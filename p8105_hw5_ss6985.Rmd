@@ -7,6 +7,8 @@ output: github_document
 
 ```{r, include = FALSE, message = FALSE, warning = FALSE}
 library(tidyverse)
+library(ggplot2)
+library(knitr)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
@@ -63,4 +65,80 @@ sim_res |>
 ```
 
 As n (# of people in a room) increases, the probability of a shared birthday increases. When the group size is about 22 people, the probability of a shared birthday is about 50%. With a group size of 50, the probability is nearly 100% which suggests it is almost certain or extremely likely that at least two people in the group will share a birthday. I expect that increasing the group size even more would, at some point, result in a 100% probability of a shared birthday. 
+
+
+## Problem 3
+
+Import raw data obtained by the Washington Post on homicides in 50 large U.S. cities. 
+
+```{r}
+homicide_df = 
+  read_csv("homicide-data.csv", na = c("NA",".",""))
+```
+
+The Washington Post has gathered data on homicides across `r length(unique(homicide_df$city))` large U.S. cities over the past years, providing information on more than `r nrow(homicide_df)` observations of homicide cases. This dataset contains `r ncol(homicide_df)` variables, which are `uid`, `reported_date`, `victim_last`, `victim_race`, `victim_age`, `victim_sex`, `city`, `state`, `lat`, `lon`, and `disposition`. Each entry is information about a unique homicide incident, the victim's demographics, and the case resolution status. 
+
+Create a `citystate_df` variable. Summarize within cities to obtain the total number of homicides and the number of unsolved homicides. 
+
+```{r}
+citystate_df = homicide_df |>
+  janitor::clean_names() |>
+  mutate(
+    city_state = str_c(city, ", ", state), 
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")
+    ) |>
+  group_by(city_state) |>
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(unsolved, na.rm = TRUE)
+  ) 
+```
+
+Estimate the proportion of homicides that are unsolved in Baltimore, MD. 
+
+```{r}
+baltimore_df = citystate_df |>
+  filter(city_state == "Baltimore, MD") |>
+  select (-city_state) |>
+  as.matrix()|>
+  prop.test() 
+
+baltimore_tidy_result = broom::tidy(baltimore_df) |>
+  select(estimate, conf.low, conf.high) |>
+  knitr::kable()
+
+baltimore_tidy_result
+```
+
+Extract both the proportion of unsolved homicides and the confidence interval for each of the cities. 
+
+```{r}
+cities_df = citystate_df |>
+  mutate(
+    prop_test = map2(unsolved_homicides, total_homicides, ~ prop.test(x = .x, n = .y)),
+    tidy_result = map(prop_test, broom::tidy) 
+  ) |>
+  unnest(tidy_result) |>
+  select(city_state, estimate, conf.low, conf.high) 
+```
+
+Create a plot that shows the estimates and CIs for each city. 
+
+```{r}
+cities_df = cities_df |> 
+  arrange(desc(estimate)) |> 
+  mutate(city_state = fct_reorder(city_state, estimate))
+
+ggplot(cities_df, aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  labs(
+    title = "Proportion of Unsolved Homicides by City",
+    x = "City",
+    y = "Proportion of Unsolved Homicides",
+    caption = "Confidence intervals are based on a 95% confidence level"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 5))
+```
+
 
